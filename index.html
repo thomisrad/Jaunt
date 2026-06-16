@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Odo</title>
+  
+  <link rel="stylesheet" href="style.css">
+  
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+
+  <div class="app-container">
+    <button id="theme-toggle" title="Toggle Dark Mode">🌙</button>
+    
+    <h1>Odo</h1>
+    
+    <input type="date" id="date-input">
+    <input type="text" id="distance-input" placeholder="Distance (miles)">
+    <textarea id="notes-input" placeholder="How was the ride? (Optional)" rows="3"></textarea>
+    <input type="file" id="photo-input" accept="image/*" multiple>
+    <br><br>
+    
+    <button id="log-button">Log this Ride!</button>
+    <p id="loading-text" style="display: none; color: #64748b; font-size: 14px;">Fetching location & processing...</p>
+
+    <div id="ride-history">
+      <h3>My Journey</h3>
+      <p>Total: <strong id="total-miles">0</strong> miles</p>
+      <div id="ride-list"></div>
+    </div>
+  </div>
+
+  <script type="module" src="script.js"></script>
+
+</body>
+</html>
