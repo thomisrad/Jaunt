@@ -142,3 +142,43 @@ body.dark-theme { --icon-invert: 1; }
 .gallery-photo { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
 .clickable-photo { cursor: pointer; transition: opacity 0.2s ease; }
 .clickable-photo:hover { opacity: 0.8; }
+
+/* --- Sign-in & views --- */
+.hidden { display: none !important; }
+.muted { color: var(--text-muted); font-size: 14px; }
+
+.primary-button {
+  background-color: #10b981;
+  color: white;
+  border: none;
+  width: 85%;
+  padding: 15px;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.user-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+  gap: 10px;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  text-decoration: underline;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  flex-shrink: 0;
+}

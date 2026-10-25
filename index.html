@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Odo</title>
-  
+  <title>Jaunt</title>
+
   <link rel="stylesheet" href="style.css">
-  
+
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
@@ -14,22 +14,51 @@
 
   <div class="app-container">
     <button id="theme-toggle" title="Toggle Dark Mode">🌙</button>
-    
-    <h1>Odo</h1>
-    
-    <input type="date" id="date-input">
-    <input type="text" id="distance-input" placeholder="Distance (miles)">
-    <textarea id="notes-input" placeholder="How was the ride? (Optional)" rows="3"></textarea>
-    <input type="file" id="photo-input" accept="image/*" multiple>
-    <br><br>
-    
-    <button id="log-button">Log this Ride!</button>
-    <p id="loading-text" style="display: none; color: #64748b; font-size: 14px;">Fetching location & processing...</p>
 
-    <div id="ride-history">
-      <h3>My Journey</h3>
-      <p>Total: <strong id="total-miles">0</strong> miles</p>
-      <div id="ride-list"></div>
+    <h1>Jaunt</h1>
+
+    <!-- Shown while Firebase checks whether you're signed in -->
+    <div id="loading-view">
+      <p class="muted">Loading…</p>
+    </div>
+
+    <!-- Shown to anyone who isn't signed in -->
+    <div id="signin-view" class="hidden">
+      <p class="muted">A ride journal. Sign in to follow along.</p>
+      <button id="signin-button" class="primary-button">Sign in with Google</button>
+    </div>
+
+    <!-- Shown to people who signed in but aren't on the invite list -->
+    <div id="denied-view" class="hidden">
+      <p>This journal is invite-only.</p>
+      <p class="muted">You're signed in as <strong id="denied-email"></strong>. Ask the owner to add this address, then reload the page.</p>
+      <button class="signout-button link-button">Sign out</button>
+    </div>
+
+    <!-- The journal itself, for the owner and invited viewers -->
+    <div id="app-view" class="hidden">
+      <div class="user-bar">
+        <span id="user-email"></span>
+        <button class="signout-button link-button">Sign out</button>
+      </div>
+
+      <!-- Only the owner sees this form -->
+      <div id="owner-form" class="hidden">
+        <input type="date" id="date-input">
+        <input type="text" id="distance-input" inputmode="decimal" placeholder="Distance (miles)">
+        <textarea id="notes-input" placeholder="How was the ride? (Optional)" rows="3"></textarea>
+        <input type="file" id="photo-input" accept="image/*" multiple>
+        <br><br>
+
+        <button id="log-button" class="primary-button">Log this Ride!</button>
+        <p id="loading-text" class="muted hidden">Fetching location & processing...</p>
+      </div>
+
+      <div id="ride-history">
+        <h3>The Journey</h3>
+        <p>Total: <strong id="total-miles">0</strong> miles</p>
+        <div id="ride-list"></div>
+      </div>
     </div>
   </div>
 

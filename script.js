@@ -1,8 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-import { getFirestore, collection, addDoc, getDocs, query, orderBy, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { getFirestore, collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
 // ==========================================
-// 1. YOUR CLOUD KEYS (FILL THESE IN!)
+// CLOUD KEYS (safe to be public — the security rules protect the data)
 // ==========================================
 const CLOUDINARY_CLOUD_NAME = "dtfhbvjkr"; 
 const CLOUDINARY_UPLOAD_PRESET = "f4qtscfi"; 
@@ -22,6 +23,7 @@ const firebaseConfig = {
 // Initialize the Internet Databases
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
 
 const themeToggle = document.getElementById('theme-toggle');
 if (localStorage.getItem('theme') === 'dark') {
@@ -47,6 +49,71 @@ const photoInput = document.getElementById('photo-input');
 const notesInput = document.getElementById('notes-input'); 
 const rideList = document.getElementById('ride-list');
 const totalMilesText = document.getElementById('total-miles');
+
+// ==========================================
+// SIGN-IN & INVITE CHECK
+// Who's allowed in lives in Firestore at config/access:
+//   owner:   your Google email (can post and delete)
+//   viewers: list of invited emails (can only view)
+// The security rules (firestore.rules) enforce this on Google's side,
+// so hiding buttons here is just for a tidy screen.
+// ==========================================
+const views = {
+  loading: document.getElementById('loading-view'),
+  signin: document.getElementById('signin-view'),
+  denied: document.getElementById('denied-view'),
+  app: document.getElementById('app-view')
+};
+const ownerForm = document.getElementById('owner-form');
+let isOwner = false;
+
+function showView(name) {
+  for (const key in views) {
+    views[key].classList.toggle('hidden', key !== name);
+  }
+}
+
+document.getElementById('signin-button').addEventListener('click', async function() {
+  try {
+    await signInWithPopup(auth, new GoogleAuthProvider());
+  } catch (error) {
+    console.error("Sign-in failed:", error);
+    if (error.code !== 'auth/popup-closed-by-user') {
+      alert("Sign-in didn't work. If you're opening this as a local file, it needs to be on the web (GitHub Pages) for Google sign-in.");
+    }
+  }
+});
+
+document.querySelectorAll('.signout-button').forEach(function(button) {
+  button.addEventListener('click', function() { signOut(auth); });
+});
+
+onAuthStateChanged(auth, async function(user) {
+  if (!user) {
+    isOwner = false;
+    showView('signin');
+    return;
+  }
+
+  try {
+    // If you're not invited, the security rules refuse this read.
+    const accessDoc = await getDoc(doc(db, "config", "access"));
+    if (!accessDoc.exists()) {
+      throw { code: 'permission-denied' };
+    }
+    isOwner = accessDoc.data().owner === user.email;
+  } catch (error) {
+    console.error("Access check failed:", error);
+    document.getElementById('denied-email').innerText = user.email;
+    showView('denied');
+    return;
+  }
+
+  document.getElementById('user-email').innerText = user.email + (isOwner ? ' (owner)' : '');
+  ownerForm.classList.toggle('hidden', !isOwner);
+  showView('app');
+  fetchRidesFromCloud();
+});
 
 let rides = []; 
 
@@ -176,6 +243,7 @@ function updateScreen() {
     
     // --- NEW: Delete from Firebase ---
     deleteBtn.addEventListener('click', async function() {
+      if (!confirm("Delete this ride? This can't be undone.")) return;
       deleteBtn.innerText = "Deleting...";
       try {
         await deleteDoc(doc(db, "rides", currentRide.firebaseId));
@@ -186,7 +254,9 @@ function updateScreen() {
       }
     });
     
-    footer.appendChild(deleteBtn);
+    if (isOwner) {
+      footer.appendChild(deleteBtn);
+    }
     card.appendChild(footer);
     
     rideList.appendChild(card);
@@ -202,11 +272,9 @@ function updateScreen() {
     }
   }
   
-  totalMilesText.innerText = total;
+  totalMilesText.innerText = Math.round(total * 10) / 10;
 }
 
-// Fetch the rides as soon as the app loads!
-fetchRidesFromCloud();
 
 // The Canvas Compressor Engine (still saves us massive internet bandwidth!)
 function processImage(file) {
@@ -259,7 +327,7 @@ logButton.addEventListener('click', async function() {
   if (distance > 0 && selectedDate !== "") {
     logButton.disabled = true;
     logButton.innerText = "Logging...";
-    loadingText.style.display = "block";
+    loadingText.classList.remove("hidden");
     loadingText.innerText = "Fetching location...";
 
     const geoOptions = { timeout: 5000, maximumAge: 0, enableHighAccuracy: false };
@@ -335,7 +403,7 @@ async function saveRideData(distance, selectedDate, notes, city, temp, lat, lon)
     dateInput.value = '';
     logButton.disabled = false;
     logButton.innerText = "Log this Ride!";
-    loadingText.style.display = "none";
+    loadingText.classList.add("hidden");
     
     fetchRidesFromCloud();
 
@@ -344,6 +412,6 @@ async function saveRideData(distance, selectedDate, notes, city, temp, lat, lon)
     alert("Error saving to the internet. Check the console for details.");
     logButton.disabled = false;
     logButton.innerText = "Log this Ride!";
-    loadingText.style.display = "none";
+    loadingText.classList.add("hidden");
   }
 }
