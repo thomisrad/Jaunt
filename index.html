@@ -9,6 +9,8 @@
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Reads the GPS location and time stored inside photos -->
+  <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/lite.umd.js"></script>
 </head>
 <body>
 
@@ -48,7 +50,12 @@
         <input type="text" id="distance-input" inputmode="decimal" placeholder="Distance (miles)">
         <textarea id="notes-input" placeholder="How was the ride? (Optional)" rows="3"></textarea>
         <input type="file" id="photo-input" accept="image/*" multiple>
-        <br><br>
+
+        <!-- Where the ride happened: from a photo, your current spot, or a tap -->
+        <div id="location-picker">
+          <div id="picker-map"></div>
+          <p id="location-status" class="muted">Finding your location…</p>
+        </div>
 
         <button id="log-button" class="primary-button">Log this Ride!</button>
         <p id="loading-text" class="muted hidden">Fetching location & processing...</p>
