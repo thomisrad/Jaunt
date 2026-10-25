@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
 import { getFirestore, collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+import { getAuth, initializeAuth, indexedDBLocalPersistence, GoogleAuthProvider, signInWithPopup, signInWithCredential, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
 // ==========================================
 // CLOUD KEYS (safe to be public — the security rules protect the data)
@@ -23,7 +23,16 @@ const firebaseConfig = {
 // Initialize the Internet Databases
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-const auth = getAuth(app);
+
+// Are we running inside the Android app (instead of a web browser)?
+const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+// In the app, keep you signed in between launches
+const auth = IS_APP ? initializeAuth(app, { persistence: indexedDBLocalPersistence }) : getAuth(app);
+
+// Talk to the app's native (Android) parts
+function callNative(plugin, method, options) {
+  return window.Capacitor.nativePromise(plugin, method, options || {});
+}
 
 const themeToggle = document.getElementById('theme-toggle');
 if (localStorage.getItem('theme') === 'dark') {
@@ -75,17 +84,32 @@ function showView(name) {
 
 document.getElementById('signin-button').addEventListener('click', async function() {
   try {
-    await signInWithPopup(auth, new GoogleAuthProvider());
+    if (IS_APP) {
+      // Android's own Google account picker, then hand the result to Firebase
+      const result = await callNative('FirebaseAuthentication', 'signInWithGoogle', { skipNativeAuth: true });
+      const idToken = result && result.credential ? result.credential.idToken : null;
+      await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+    } else {
+      await signInWithPopup(auth, new GoogleAuthProvider());
+    }
   } catch (error) {
     console.error("Sign-in failed:", error);
-    if (error.code !== 'auth/popup-closed-by-user') {
+    const message = String((error && error.message) || '');
+    if (IS_APP) {
+      if (!/cancel/i.test(message)) alert("Sign-in didn't work: " + message);
+    } else if (error.code !== 'auth/popup-closed-by-user') {
       alert("Sign-in didn't work. If you're opening this as a local file, it needs to be on the web (GitHub Pages) for Google sign-in.");
     }
   }
 });
 
 document.querySelectorAll('.signout-button').forEach(function(button) {
-  button.addEventListener('click', function() { signOut(auth); });
+  button.addEventListener('click', async function() {
+    if (IS_APP) {
+      try { await callNative('FirebaseAuthentication', 'signOut'); } catch (e) { /* not signed in natively */ }
+    }
+    signOut(auth);
+  });
 });
 
 onAuthStateChanged(auth, async function(user) {
@@ -496,36 +520,89 @@ function refreshPhotoMarkers() {
   }
 }
 
-// When photos are chosen: read each one's GPS and time, and put it on the map
-photoInput.addEventListener('change', async function() {
+// Turns "2026:10:20 14:35:00" (how cameras store time) into a Date
+function parseExifTime(text) {
+  const m = /^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(text || '');
+  return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : null;
+}
+
+// Website: the normal file picker
+photoInput.addEventListener('change', function() {
+  if (IS_APP) return;
+  const files = Array.from(photoInput.files).slice(0, 9);
+  loadPhotos(files.map(function(file) { return { file: file }; }));
+});
+
+// App: Android's file picker, which keeps each photo's location
+photoInput.addEventListener('click', async function(e) {
+  if (!IS_APP) return;
+  e.preventDefault();
+  try {
+    const result = await callNative('JauntPhotos', 'pick');
+    const picked = (result && result.photos) || [];
+    if (picked.length === 0) return; // cancelled
+    locationStatus.innerText = 'Reading photos…';
+    const items = [];
+    for (const p of picked) {
+      const response = await fetch(window.Capacitor.convertFileSrc(p.path));
+      const blob = await response.blob();
+      items.push({
+        file: new File([blob], p.path.split('/').pop(), { type: p.mimeType || blob.type || 'image/jpeg' }),
+        lat: typeof p.lat === 'number' ? p.lat : null,
+        lon: typeof p.lon === 'number' ? p.lon : null,
+        time: parseExifTime(p.taken)
+      });
+    }
+    if (result.skipped > 0) alert(`Only the first 9 photos were added (${result.skipped} skipped).`);
+    loadPhotos(items);
+  } catch (error) {
+    console.error('Photo picker failed:', error);
+    alert("Couldn't open your photos: " + ((error && error.message) || error));
+  }
+});
+
+// Puts chosen photos on the map. Each item: { file, lat?, lon?, time? }
+async function loadPhotos(items) {
   if (pickerMarker) {
     pickerMap.removeLayer(pickerMarker);
     pickerMarker = null;
   }
   clearPendingPhotos();
 
-  const files = Array.from(photoInput.files).slice(0, 9);
-  if (files.length === 0) {
+  if (items.length === 0) {
     if (pickedSpot) setSpot(pickedSpot.lat, pickedSpot.lon, pickedSpot.source);
     return;
   }
   locationStatus.innerText = 'Reading photos…';
 
-  for (const file of files) {
-    let data = null;
-    try {
-      data = await exifr.parse(file, { gps: true, exif: true, tiff: true });
-    } catch (error) {
-      console.warn('Could not read photo info:', error);
+  for (const item of items) {
+    let lat = typeof item.lat === 'number' ? item.lat : null;
+    let lon = typeof item.lon === 'number' ? item.lon : null;
+    let time = item.time || null;
+
+    // Look inside the photo for anything we don't know yet
+    if (lat === null || time === null) {
+      try {
+        const data = await exifr.parse(item.file, { gps: true, exif: true, tiff: true });
+        if (data && lat === null && typeof data.latitude === 'number' && typeof data.longitude === 'number') {
+          lat = data.latitude;
+          lon = data.longitude;
+        }
+        if (data && time === null && data.DateTimeOriginal instanceof Date) {
+          time = data.DateTimeOriginal;
+        }
+      } catch (error) {
+        console.warn('Could not read photo info:', error);
+      }
     }
-    const fromPhoto = !!(data && typeof data.latitude === 'number' && typeof data.longitude === 'number');
+
     pendingPhotos.push({
-      file: file,
-      preview: URL.createObjectURL(file),
-      lat: fromPhoto ? data.latitude : null,
-      lon: fromPhoto ? data.longitude : null,
-      time: (data && data.DateTimeOriginal instanceof Date) ? data.DateTimeOriginal : null,
-      needsSpot: !fromPhoto
+      file: item.file,
+      preview: URL.createObjectURL(item.file),
+      lat: lat,
+      lon: lon,
+      time: time,
+      needsSpot: lat === null
     });
   }
 
@@ -568,7 +645,7 @@ photoInput.addEventListener('change', async function() {
   if (firstTime && dateInput.value === '') {
     dateInput.value = toDateString(firstTime.time);
   }
-});
+}
 
 function toDateString(date) {
   const y = date.getFullYear();
