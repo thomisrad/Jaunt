@@ -175,59 +175,6 @@ function updateScreen() {
       card.appendChild(notesText);
     }
 
-    // Drawing the Photos from Cloudinary URLs!
-    if (currentRide.photos && currentRide.photos.length > 0) {
-      if (currentRide.photos.length === 1) {
-        const img = document.createElement('img');
-        img.src = currentRide.photos[0];
-        img.className = 'ride-photo'; 
-        card.appendChild(img);
-      } else {
-        const mediaContainer = document.createElement('div');
-        const gallery = document.createElement('div');
-        gallery.className = 'photo-gallery';
-        
-        const fullView = document.createElement('div');
-        fullView.style.display = 'none'; 
-        const fullImg = document.createElement('img');
-        fullImg.className = 'ride-photo clickable-photo';
-        
-        const hintText = document.createElement('div');
-        hintText.innerText = '🔄 Tap image to return to grid';
-        hintText.style.fontSize = '12px';
-        hintText.style.color = 'var(--text-muted)';
-        hintText.style.textAlign = 'center';
-        hintText.style.marginTop = '-10px';
-        hintText.style.marginBottom = '15px';
-        hintText.style.cursor = 'pointer';
-
-        fullView.appendChild(fullImg);
-        fullView.appendChild(hintText);
-        
-        currentRide.photos.forEach(function(photoUrl) {
-          const img = document.createElement('img');
-          img.src = photoUrl;
-          img.className = 'gallery-photo clickable-photo';
-          
-          img.addEventListener('click', function() {
-            gallery.style.display = 'none'; 
-            fullImg.src = photoUrl; 
-            fullView.style.display = 'block'; 
-          });
-          gallery.appendChild(img);
-        });
-        
-        fullView.addEventListener('click', function() {
-          fullView.style.display = 'none'; 
-          gallery.style.display = 'grid'; 
-        });
-        
-        mediaContainer.appendChild(gallery);
-        mediaContainer.appendChild(fullView);
-        card.appendChild(mediaContainer);
-      }
-    }
-
     const mapContainer = document.createElement('div');
     mapContainer.className = 'ride-map';
     card.appendChild(mapContainer);
@@ -263,47 +210,181 @@ function updateScreen() {
     
     rideList.appendChild(card);
 
-    if (currentRide.lat && currentRide.lon) {
-      const map = L.map(mapContainer, { zoomControl: false }).setView([currentRide.lat, currentRide.lon], 13);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap'
-      }).addTo(map);
-      L.marker([currentRide.lat, currentRide.lon]).addTo(map);
-    } else {
-      mapContainer.style.display = 'none';
-    }
+    renderRideMedia(mapContainer, currentRide);
   }
   
   totalMilesText.innerText = Math.round(total * 10) / 10;
 }
 
 
-// The Canvas Compressor Engine (still saves us massive internet bandwidth!)
+// ==========================================
+// PHOTO MAPS
+// Each photo is saved as { url, lat, lon, time }.
+// Older rides saved plain photo links; those get placed at the ride's pin.
+// ==========================================
+function normalizePhotos(ride) {
+  const list = (ride.photos || []).map(function(p) {
+    if (typeof p === 'string') {
+      return { url: p, lat: ride.lat ?? null, lon: ride.lon ?? null, time: null };
+    }
+    return p;
+  });
+  // Oldest first, so the numbers follow the ride. Photos without a time keep their order.
+  return list
+    .map(function(p, i) { return { p: p, i: i }; })
+    .sort(function(x, y) {
+      if (x.p.time && y.p.time) return x.p.time - y.p.time;
+      return x.i - y.i;
+    })
+    .map(function(x) { return x.p; });
+}
+
+function hasSpot(p) {
+  return typeof p.lat === 'number' && typeof p.lon === 'number';
+}
+
+// Ask Cloudinary for a small square version of a photo (saves data on the map)
+function thumbUrl(url, size) {
+  if (url.includes('/image/upload/')) {
+    return url.replace('/image/upload/', `/image/upload/c_fill,g_auto,w_${size},h_${size}/`);
+  }
+  return url;
+}
+
+function photoIcon(src, number, extraClass, nudge) {
+  const shift = (nudge || 0) * 22; // fan out photos taken at the same spot
+  return L.divIcon({
+    className: 'photo-pin ' + (extraClass || ''),
+    html: `<img src="${src}" alt=""><span>${number}</span>`,
+    iconSize: [46, 46],
+    iconAnchor: [23 - shift, 23 + shift]
+  });
+}
+
+// How many photos so far sit at (nearly) this spot — used to fan them out
+function makeNudger() {
+  const seen = {};
+  return function(lat, lon) {
+    const key = lat.toFixed(4) + ',' + lon.toFixed(4);
+    seen[key] = (seen[key] || 0) + 1;
+    return seen[key] - 1;
+  };
+}
+
+function addTiles(map) {
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+}
+
+function renderRideMedia(mapContainer, ride) {
+  const photos = normalizePhotos(ride);
+  const placed = photos.filter(hasSpot);
+  const unplaced = photos.filter(function(p) { return !hasSpot(p); });
+
+  if (placed.length > 0) {
+    const map = L.map(mapContainer, { zoomControl: false });
+    addTiles(map);
+    const nudge = makeNudger();
+    const points = [];
+    placed.forEach(function(p) {
+      const n = photos.indexOf(p);
+      points.push([p.lat, p.lon]);
+      L.marker([p.lat, p.lon], { icon: photoIcon(thumbUrl(p.url, 96), n + 1, '', nudge(p.lat, p.lon)) })
+        .addTo(map)
+        .on('click', function() { openLightbox(photos, n); });
+    });
+    if (points.length > 1) {
+      L.polyline(points, { color: '#10b981', weight: 3, dashArray: '6 8', opacity: 0.9 }).addTo(map);
+      map.fitBounds(points, { padding: [35, 35], maxZoom: 15 });
+    } else {
+      map.setView(points[0], 14);
+    }
+  } else if (typeof ride.lat === 'number' && typeof ride.lon === 'number') {
+    const map = L.map(mapContainer, { zoomControl: false }).setView([ride.lat, ride.lon], 13);
+    addTiles(map);
+    L.marker([ride.lat, ride.lon]).addTo(map);
+  } else {
+    mapContainer.style.display = 'none';
+  }
+
+  // Photos with no location at all still need to be viewable
+  if (unplaced.length > 0) {
+    const strip = document.createElement('div');
+    strip.className = 'photo-strip';
+    unplaced.forEach(function(p) {
+      const img = document.createElement('img');
+      img.src = thumbUrl(p.url, 120);
+      img.alt = '';
+      img.addEventListener('click', function() { openLightbox(photos, photos.indexOf(p)); });
+      strip.appendChild(img);
+    });
+    mapContainer.after(strip);
+  }
+}
+
+// ---------- Full-size photo viewer ----------
+const lightbox = document.createElement('div');
+lightbox.className = 'lightbox hidden';
+lightbox.innerHTML = `
+  <button class="lb-close" aria-label="Close">✕</button>
+  <button class="lb-prev" aria-label="Previous photo">‹</button>
+  <img class="lb-img" alt="">
+  <button class="lb-next" aria-label="Next photo">›</button>
+  <div class="lb-count"></div>`;
+document.body.appendChild(lightbox);
+let lbPhotos = [];
+let lbIndex = 0;
+
+function showLightboxPhoto() {
+  lightbox.querySelector('.lb-img').src = lbPhotos[lbIndex].url;
+  lightbox.querySelector('.lb-count').innerText = `${lbIndex + 1} / ${lbPhotos.length}`;
+  const multiple = lbPhotos.length > 1;
+  lightbox.querySelector('.lb-prev').classList.toggle('hidden', !multiple);
+  lightbox.querySelector('.lb-next').classList.toggle('hidden', !multiple);
+}
+function openLightbox(photos, index) {
+  lbPhotos = photos;
+  lbIndex = index;
+  showLightboxPhoto();
+  lightbox.classList.remove('hidden');
+}
+function closeLightbox() { lightbox.classList.add('hidden'); }
+function stepLightbox(delta) {
+  lbIndex = (lbIndex + delta + lbPhotos.length) % lbPhotos.length;
+  showLightboxPhoto();
+}
+lightbox.querySelector('.lb-close').addEventListener('click', closeLightbox);
+lightbox.querySelector('.lb-prev').addEventListener('click', function(e) { e.stopPropagation(); stepLightbox(-1); });
+lightbox.querySelector('.lb-next').addEventListener('click', function(e) { e.stopPropagation(); stepLightbox(1); });
+lightbox.addEventListener('click', function(e) { if (e.target === lightbox) closeLightbox(); });
+document.addEventListener('keydown', function(e) {
+  if (lightbox.classList.contains('hidden')) return;
+  if (e.key === 'Escape') closeLightbox();
+  if (e.key === 'ArrowLeft' && lbPhotos.length > 1) stepLightbox(-1);
+  if (e.key === 'ArrowRight' && lbPhotos.length > 1) stepLightbox(1);
+});
+
+// Shrinks photos before upload (long side max 1600px) — keeps the whole picture
 function processImage(file) {
   return new Promise(function(resolve) {
     const img = new Image();
     const objectUrl = URL.createObjectURL(file);
-    
+
     img.onload = function() {
-      const size = Math.min(img.width, img.height);
-      const startX = (img.width - size) / 2;
-      const startY = (img.height - size) / 2;
+      const MAX_SIDE = 1600;
+      const scale = Math.min(1, MAX_SIDE / Math.max(img.width, img.height));
       const canvas = document.createElement('canvas');
-      const MAX_SIZE = 600; 
-      const finalSize = Math.min(size, MAX_SIZE);
-      canvas.width = finalSize;
-      canvas.height = finalSize;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, startX, startY, size, size, 0, 0, finalSize, finalSize);
-      
-      const optimizedImage = canvas.toDataURL('image/jpeg', 0.7); 
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(objectUrl);
-      resolve(optimizedImage); 
+      resolve(canvas.toDataURL('image/jpeg', 0.8));
     };
 
     img.onerror = function() {
       URL.revokeObjectURL(objectUrl);
-      resolve(null); 
+      resolve(null);
     };
     img.src = objectUrl;
   });
@@ -323,16 +404,18 @@ async function uploadToCloudinary(base64Image) {
 
 // ==========================================
 // WHERE & WHEN THE RIDE HAPPENED
-// Priority: a photo's GPS > a spot you tap > your current location.
+// With photos: each photo sits on the map where it was taken (drag to fix).
+// Without photos: one pin — your current spot, or wherever you tap.
 // ==========================================
 let pickerMap = null;
-let pickerMarker = null;
-let pickedSpot = null;          // { lat, lon, source: 'photo' | 'tap' | 'current' }
-let photoTime = null;           // Date the first photo was taken, if known
+let pickerMarker = null;        // the single pin, used when there are no photos
+let pickedSpot = null;          // { lat, lon, source: 'tap' | 'current' }
+let pendingPhotos = [];         // [{ file, preview, lat, lon, time, fromPhoto, marker }]
 const locationStatus = document.getElementById('location-status');
 
 function setSpot(lat, lon, source) {
   pickedSpot = { lat: lat, lon: lon, source: source };
+  if (pendingPhotos.length > 0) return; // photos are in charge of the map
   if (!pickerMarker) {
     pickerMarker = L.marker([lat, lon], { draggable: true }).addTo(pickerMap);
     pickerMarker.on('dragend', function() {
@@ -343,13 +426,9 @@ function setSpot(lat, lon, source) {
     pickerMarker.setLatLng([lat, lon]);
   }
   if (source !== 'tap') pickerMap.setView([lat, lon], 13);
-
-  const messages = {
-    photo: '📷 Location from your photo. Tap the map to change it.',
-    tap: '📍 Pinned where you tapped.',
-    current: '📍 Using where you are now. Tap the map if you rode somewhere else.'
-  };
-  locationStatus.innerText = messages[source];
+  locationStatus.innerText = source === 'tap'
+    ? '📍 Pinned where you tapped.'
+    : '📍 Using where you are now. Tap the map if you rode somewhere else.';
 }
 
 function initPicker() {
@@ -358,12 +437,22 @@ function initPicker() {
     return;
   }
   pickerMap = L.map('picker-map', { zoomControl: false }).setView([39.5, -98.35], 3);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap'
-  }).addTo(pickerMap);
+  addTiles(pickerMap);
 
   pickerMap.on('click', function(e) {
-    setSpot(e.latlng.lat, e.latlng.lng, 'tap');
+    if (pendingPhotos.length === 0) {
+      setSpot(e.latlng.lat, e.latlng.lng, 'tap');
+      return;
+    }
+    // With photos: a tap places the next photo that still needs a spot
+    const next = pendingPhotos.find(function(p) { return p.needsSpot; });
+    if (next) {
+      next.lat = e.latlng.lat;
+      next.lon = e.latlng.lng;
+      next.needsSpot = false;
+      next.marker.setLatLng(e.latlng);
+      refreshPhotoMarkers();
+    }
   });
 
   useCurrentLocation();
@@ -371,49 +460,113 @@ function initPicker() {
 
 function useCurrentLocation() {
   if (!navigator.geolocation) {
-    locationStatus.innerText = 'Tap the map to mark where you rode.';
+    if (pendingPhotos.length === 0) locationStatus.innerText = 'Tap the map to mark where you rode.';
     return;
   }
-  locationStatus.innerText = 'Finding your location…';
+  if (pendingPhotos.length === 0) locationStatus.innerText = 'Finding your location…';
   navigator.geolocation.getCurrentPosition(function(position) {
-    // Don't overwrite a spot from a photo or a tap that came in first
     if (!pickedSpot) {
       setSpot(position.coords.latitude, position.coords.longitude, 'current');
     }
   }, function() {
-    if (!pickedSpot) locationStatus.innerText = 'Tap the map to mark where you rode.';
+    if (!pickedSpot && pendingPhotos.length === 0) locationStatus.innerText = 'Tap the map to mark where you rode.';
   }, { timeout: 8000, maximumAge: 60000, enableHighAccuracy: false });
 }
 
-// When photos are chosen, look inside them for GPS and the time they were taken
+function clearPendingPhotos() {
+  pendingPhotos.forEach(function(p) {
+    if (p.marker) pickerMap.removeLayer(p.marker);
+    URL.revokeObjectURL(p.preview);
+  });
+  pendingPhotos = [];
+}
+
+// Redraw numbers/outlines and update the hint under the map
+function refreshPhotoMarkers() {
+  const nudge = makeNudger();
+  pendingPhotos.forEach(function(p, i) {
+    p.marker.setIcon(photoIcon(p.preview, i + 1, p.needsSpot ? 'needs-spot' : '', nudge(p.lat, p.lon)));
+  });
+  const missing = pendingPhotos.filter(function(p) { return p.needsSpot; }).length;
+  if (missing === 0) {
+    locationStatus.innerText = '📷 Each photo is pinned where it was taken. Drag any to adjust.';
+  } else {
+    locationStatus.innerText = `📷 ${missing} photo${missing > 1 ? 's' : ''} had no location (dashed outline). ` +
+      'Tap the map to place them in order, or drag them.';
+  }
+}
+
+// When photos are chosen: read each one's GPS and time, and put it on the map
 photoInput.addEventListener('change', async function() {
-  photoTime = null;
-  const files = Array.from(photoInput.files);
+  if (pickerMarker) {
+    pickerMap.removeLayer(pickerMarker);
+    pickerMarker = null;
+  }
+  clearPendingPhotos();
+
+  const files = Array.from(photoInput.files).slice(0, 9);
+  if (files.length === 0) {
+    if (pickedSpot) setSpot(pickedSpot.lat, pickedSpot.lon, pickedSpot.source);
+    return;
+  }
+  locationStatus.innerText = 'Reading photos…';
+
   for (const file of files) {
+    let data = null;
     try {
-      const data = await exifr.parse(file, { gps: true, exif: true, tiff: true });
-      if (!data) continue;
-      if (!photoTime && data.DateTimeOriginal instanceof Date) {
-        photoTime = data.DateTimeOriginal;
-      }
-      if (typeof data.latitude === 'number' && typeof data.longitude === 'number') {
-        if (!pickedSpot || pickedSpot.source !== 'tap') {
-          setSpot(data.latitude, data.longitude, 'photo');
-        }
-        break;
-      }
+      data = await exifr.parse(file, { gps: true, exif: true, tiff: true });
     } catch (error) {
       console.warn('Could not read photo info:', error);
     }
+    const fromPhoto = !!(data && typeof data.latitude === 'number' && typeof data.longitude === 'number');
+    pendingPhotos.push({
+      file: file,
+      preview: URL.createObjectURL(file),
+      lat: fromPhoto ? data.latitude : null,
+      lon: fromPhoto ? data.longitude : null,
+      time: (data && data.DateTimeOriginal instanceof Date) ? data.DateTimeOriginal : null,
+      needsSpot: !fromPhoto
+    });
   }
 
-  // Fill in the date from the photo if you haven't picked one
-  if (photoTime && dateInput.value === '') {
-    dateInput.value = toDateString(photoTime);
+  // Oldest first so numbers follow the ride
+  pendingPhotos.sort(function(x, y) {
+    if (x.time && y.time) return x.time - y.time;
+    return 0;
+  });
+
+  // Photos without a location start at your current spot (or the map's center)
+  const fallback = pickedSpot
+    ? [pickedSpot.lat, pickedSpot.lon]
+    : [pickerMap.getCenter().lat, pickerMap.getCenter().lng];
+
+  pendingPhotos.forEach(function(p) {
+    if (p.needsSpot) {
+      p.lat = fallback[0];
+      p.lon = fallback[1];
+    }
+    p.marker = L.marker([p.lat, p.lon], { draggable: true, icon: photoIcon(p.preview, 1) }).addTo(pickerMap);
+    p.marker.on('dragend', function() {
+      const pos = p.marker.getLatLng();
+      p.lat = pos.lat;
+      p.lon = pos.lng;
+      p.needsSpot = false;
+      refreshPhotoMarkers();
+    });
+  });
+  refreshPhotoMarkers();
+
+  const points = pendingPhotos.map(function(p) { return [p.lat, p.lon]; });
+  if (points.length > 1) {
+    pickerMap.fitBounds(points, { padding: [35, 35], maxZoom: 15 });
+  } else {
+    pickerMap.setView(points[0], 14);
   }
-  const source = pickedSpot ? pickedSpot.source : null;
-  if (files.length > 0 && source !== 'photo' && source !== 'tap') {
-    locationStatus.innerText = (pickedSpot ? '📍 No location in these photos, so using where you are now. ' : 'No location in these photos. ') + 'Tap the map to set it.';
+
+  // Fill in the date from the first photo if you haven't picked one
+  const firstTime = pendingPhotos.find(function(p) { return p.time; });
+  if (firstTime && dateInput.value === '') {
+    dateInput.value = toDateString(firstTime.time);
   }
 });
 
@@ -478,16 +631,19 @@ logButton.addEventListener('click', async function() {
   logButton.innerText = "Logging...";
   loadingText.classList.remove("hidden");
 
+  // The ride's main spot: first photo if there are photos, otherwise the pin
+  const firstPhoto = pendingPhotos[0];
+  const spot = firstPhoto ? { lat: firstPhoto.lat, lon: firstPhoto.lon } : pickedSpot;
+  const timed = pendingPhotos.find(function(p) { return p.time && toDateString(p.time) === selectedDate; });
+
   let city = null, temp = "--", lat = null, lon = null;
-  if (pickedSpot) {
-    lat = pickedSpot.lat;
-    lon = pickedSpot.lon;
+  if (spot) {
+    lat = spot.lat;
+    lon = spot.lon;
     loadingText.innerText = "Looking up place & weather...";
-    // Only use the photo's hour if the photo is from the ride's date
-    const time = (photoTime && toDateString(photoTime) === selectedDate) ? photoTime : null;
     const [cityResult, tempResult] = await Promise.allSettled([
       lookUpCity(lat, lon),
-      lookUpTemp(lat, lon, selectedDate, time)
+      lookUpTemp(lat, lon, selectedDate, timed ? timed.time : null)
     ]);
     city = cityResult.status === 'fulfilled' ? cityResult.value : "Unknown place";
     temp = tempResult.status === 'fulfilled' ? tempResult.value : "--";
@@ -501,7 +657,7 @@ function resetForm() {
   notesInput.value = '';
   photoInput.value = '';
   dateInput.value = '';
-  photoTime = null;
+  clearPendingPhotos();
   pickedSpot = null;
   if (pickerMarker) {
     pickerMap.removeLayer(pickerMarker);
@@ -511,8 +667,6 @@ function resetForm() {
 }
 
 async function saveRideData(distance, selectedDate, notes, city, temp, lat, lon) {
-  const files = Array.from(photoInput.files).slice(0, 9);
-
   const newRideEntry = {
     id: Date.now(),
     date: selectedDate,
@@ -526,20 +680,22 @@ async function saveRideData(distance, selectedDate, notes, city, temp, lat, lon)
   };
 
   try {
-    if (files.length > 0) {
-      const cloudPhotoUrls = [];
+    for (let i = 0; i < pendingPhotos.length; i++) {
+      const p = pendingPhotos[i];
+      loadingText.innerText = `Preparing photo ${i + 1} of ${pendingPhotos.length}...`;
+      const optimized = await processImage(p.file);
+      if (!optimized) continue;
 
-      for (let i = 0; i < files.length; i++) {
-        loadingText.innerText = `Compressing photo ${i + 1} of ${files.length}...`;
-        const optimizedImageBase64 = await processImage(files[i]);
-
-        if (optimizedImageBase64) {
-          loadingText.innerText = `Uploading photo ${i + 1} of ${files.length}...`;
-          const cloudUrl = await uploadToCloudinary(optimizedImageBase64);
-          if (cloudUrl) cloudPhotoUrls.push(cloudUrl);
-        }
+      loadingText.innerText = `Uploading photo ${i + 1} of ${pendingPhotos.length}...`;
+      const cloudUrl = await uploadToCloudinary(optimized);
+      if (cloudUrl) {
+        newRideEntry.photos.push({
+          url: cloudUrl,
+          lat: p.lat,
+          lon: p.lon,
+          time: p.time ? p.time.getTime() : null
+        });
       }
-      newRideEntry.photos = cloudPhotoUrls;
     }
 
     loadingText.innerText = "Saving...";

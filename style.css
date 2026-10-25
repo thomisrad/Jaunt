@@ -123,7 +123,7 @@ body.dark-theme { --icon-invert: 1; }
 
 /* NEW: The container for the interactive map */
 .ride-map {
-  height: 150px;
+  height: 220px;
   width: 100%;
   border-radius: 8px;
   margin-bottom: 15px;
@@ -136,12 +136,71 @@ body.dark-theme { --icon-invert: 1; }
   background-color: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer;
 }
 
-.ride-photo { width: 100%; border-radius: 8px; margin-bottom: 15px; }
+/* --- Photo thumbnails on the maps --- */
+.photo-pin { background: none; border: none; }
+.leaflet-container .photo-pin img {
+  width: 42px !important;
+  height: 42px !important;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+  display: block;
+  background: #cbd5e1;
+  cursor: pointer;
+}
+.photo-pin span {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #10b981;
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+  min-width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 8px;
+  padding: 0 3px;
+  box-sizing: border-box;
+}
+.photo-pin.needs-spot img { border: 2px dashed #f59e0b; opacity: 0.85; }
+.photo-pin.needs-spot span { background: #f59e0b; }
 
-.photo-gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 15px; border-radius: 8px; overflow: hidden; }
-.gallery-photo { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
-.clickable-photo { cursor: pointer; transition: opacity 0.2s ease; }
-.clickable-photo:hover { opacity: 0.8; }
+/* Photos that have no location, shown under the map */
+.photo-strip { display: flex; gap: 6px; overflow-x: auto; margin: -5px 0 15px; }
+.photo-strip img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; cursor: pointer; flex-shrink: 0; }
+
+/* --- Full-size photo viewer --- */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.9);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lightbox.hidden { display: none !important; }
+.lb-img { max-width: 92vw; max-height: 82vh; border-radius: 8px; object-fit: contain; }
+.lightbox button {
+  position: absolute;
+  background: rgba(255,255,255,0.15);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  font-size: 26px;
+  line-height: 44px;
+  cursor: pointer;
+  padding: 0;
+}
+.lb-close { top: 16px; right: 16px; font-size: 20px !important; }
+.lb-prev { left: 12px; top: 50%; transform: translateY(-50%); }
+.lb-next { right: 12px; top: 50%; transform: translateY(-50%); }
+.lb-count { position: absolute; bottom: 20px; color: #cbd5e1; font-size: 13px; }
 
 /* --- Sign-in & views --- */
 .hidden { display: none !important; }
@@ -185,5 +244,5 @@ body.dark-theme { --icon-invert: 1; }
 
 /* --- Ride location picker --- */
 #location-picker { width: 85%; margin: 0 auto 15px; }
-#picker-map { height: 180px; border-radius: 10px; border: 1px solid var(--border-color); z-index: 1; }
+#picker-map { height: 220px; border-radius: 10px; border: 1px solid var(--border-color); z-index: 1; }
 #location-status { font-size: 12px; margin: 6px 0 0; text-align: left; }
